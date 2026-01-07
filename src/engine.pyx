@@ -9,7 +9,7 @@ from libc.string cimport memcpy
 
 # --- Utility math helpers ---------------------------------------------------
 
-# Replace your Numba extract_euler_angles
+# Migrated from old Numba jit functions, to be used later
 def extract_euler_angles_cython(double[:, :] R):
     cdef double sy = sqrt(R[0, 0] * R[0, 0] + R[1, 0] * R[1, 0])
     cdef bint singular = sy < 1e-6
@@ -26,7 +26,7 @@ def extract_euler_angles_cython(double[:, :] R):
 
     return roll, pitch, yaw
 
-# Replace your find_closest_tag_index
+# Ditto
 def find_closest_tag_cython(double[:, :] tvecs):
     cdef double min_dist = 1e9
     cdef int best_idx = -1
@@ -88,7 +88,7 @@ cdef extern from "apriltag_lib/apriltag.h":
     apriltag_detector_t *apriltag_detector_create()
     void apriltag_detector_add_family(apriltag_detector_t *td, apriltag_family_t *fam)
     void apriltag_detector_destroy(apriltag_detector_t *td)
-    zarray_t *apriltag_detector_detect(apriltag_detector_t *td, image_u8_t *im_orig)
+    zarray_t *apriltag_detector_detect(apriltag_detector_t *td, image_u8_t *im_orig) nogil
     void apriltag_detections_destroy(zarray_t *detections)
     image_u8_t *apriltag_to_image(apriltag_family_t *fam, uint32_t idx)
     pass
@@ -147,6 +147,8 @@ cdef extern from "apriltag_lib/apriltag_pose.h":
 cdef extern from *:
     """
     #include "apriltag_lib/apriltag.h"
+    #include <stdlib.h>
+    #include <string.h>
 
     static inline void _apriltag_set_nthreads(apriltag_detector_t *td, int nthreads) {
         td->nthreads = nthreads;
@@ -171,6 +173,25 @@ cdef extern from *:
     static inline void _apriltag_set_debug(apriltag_detector_t *td, int debug) {
         td->debug = debug;
     }
+
+    static inline image_u8_t *_make_image_u8_header(int width, int height, int stride, uint8_t *buf) {
+        image_u8_t tmp = {
+            .width = width,
+            .height = height,
+            .stride = stride,
+            .buf = buf
+        };
+        image_u8_t *im = (image_u8_t *)calloc(1, sizeof(image_u8_t));
+        if (!im) {
+            return NULL;
+        }
+        memcpy(im, &tmp, sizeof(image_u8_t));
+        return im;
+    }
+
+    static inline void _destroy_image_u8_header(image_u8_t *im) {
+        free(im);
+    }
     """
     void _apriltag_set_nthreads(apriltag_detector_t *td, int nthreads)
     void _apriltag_set_quad_decimate(apriltag_detector_t *td, float quad_decimate)
@@ -178,6 +199,8 @@ cdef extern from *:
     void _apriltag_set_refine_edges(apriltag_detector_t *td, int refine_edges)
     void _apriltag_set_decode_sharpening(apriltag_detector_t *td, double decode_sharpening)
     void _apriltag_set_debug(apriltag_detector_t *td, int debug)
+    image_u8_t *_make_image_u8_header(int width, int height, int stride, uint8_t *buf)
+    void _destroy_image_u8_header(image_u8_t *im)
 
 # --- Apriltag detector lifetime ------------------------------------------------
 
@@ -251,7 +274,6 @@ cdef void _ensure_detector():
         raise MemoryError("Unable to allocate Apriltag detector")
 
     _apriltag_family = _create_family(_apriltag_family_name)
-    _apriltag_family_name_active = _apriltag_family_name
     if not _apriltag_family:
         apriltag_detector_destroy(_apriltag_detector)
         _apriltag_detector = NULL
@@ -259,6 +281,7 @@ cdef void _ensure_detector():
 
     apriltag_detector_add_family(_apriltag_detector, _apriltag_family)
     _apply_detector_config(_apriltag_detector)
+    _apriltag_family_name_active = _apriltag_family_name
 
 
 def set_tag_family(str family_name):
@@ -366,7 +389,8 @@ def detect_tags(cnp.ndarray[cnp.uint8_t, ndim=2, mode="c"] image,
                 double fy,
                 double cx,
                 double cy,
-                double tag_size):
+                double tag_size,
+                bint copy=True):
     """
     Detect AprilTags in a grayscale image and optionally estimate their pose.
 
@@ -380,6 +404,9 @@ def detect_tags(cnp.ndarray[cnp.uint8_t, ndim=2, mode="c"] image,
         Principal point offsets in pixels.
     tag_size : float
         Physical size of the tag edge (meters). Used for pose estimation.
+    copy : bool
+        When True, copy the image into an aligned buffer (safer). When False,
+        wrap the input buffer directly (faster, but stride/alignment must be valid).
 
     Returns
     -------
@@ -399,21 +426,35 @@ def detect_tags(cnp.ndarray[cnp.uint8_t, ndim=2, mode="c"] image,
     cdef int width = <int> carr.shape[1]
     cdef int stride_bytes = <int> carr.strides[0]
     cdef uint8_t *arr_ptr = &carr[0, 0]
-    cdef image_u8_t *frame = image_u8_create_alignment(width, height, 96)
-    if not frame:
-        raise MemoryError("Unable to allocate Apriltag image buffer")
-
+    cdef image_u8_t *frame = NULL
+    cdef bint owns_frame = True
+    cdef zarray_t *detections
     cdef int y
-    for y in range(height):
-        memcpy(
-            frame.buf + y * frame.stride,
-            <void *> (arr_ptr + y * stride_bytes),
-            <size_t> width,
-        )
 
-    detections = apriltag_detector_detect(_apriltag_detector, frame)
+    if copy:
+        frame = image_u8_create_alignment(width, height, 96)
+        if not frame:
+            raise MemoryError("Unable to allocate Apriltag image buffer")
+
+        for y in range(height):
+            memcpy(
+                frame.buf + y * frame.stride,
+                <void *> (arr_ptr + y * stride_bytes),
+                <size_t> width,
+            )
+    else:
+        frame = _make_image_u8_header(width, height, stride_bytes, arr_ptr)
+        if not frame:
+            raise MemoryError("Unable to allocate Apriltag image header")
+        owns_frame = False
+
+    with nogil:
+        detections = apriltag_detector_detect(_apriltag_detector, frame)
     if not detections:
-        image_u8_destroy(frame)
+        if owns_frame:
+            image_u8_destroy(frame)
+        else:
+            _destroy_image_u8_header(frame)
         return []
 
     cdef apriltag_detection_t **det_ptr = <apriltag_detection_t **> detections.data
@@ -469,7 +510,10 @@ def detect_tags(cnp.ndarray[cnp.uint8_t, ndim=2, mode="c"] image,
             })
     finally:
         apriltag_detections_destroy(detections)
-        image_u8_destroy(frame)
+        if owns_frame:
+            image_u8_destroy(frame)
+        else:
+            _destroy_image_u8_header(frame)
 
     return results
 

@@ -1,4 +1,5 @@
 import argparse
+import time
 
 import vision_engine
 
@@ -10,6 +11,7 @@ def main(argv=None):
     parser.add_argument("--tag-size", type=float, default=0.162, help="Tag size in meters")
     parser.add_argument("--scale", type=int, default=8, help="Scale factor for detection")
     parser.add_argument("--invert", action="store_true", help="Invert grayscale image")
+    parser.add_argument("--runs", type=int, default=10, help="Timing iterations per mode")
     args = parser.parse_args(argv)
 
     vision_engine.set_tag_family(args.family)
@@ -31,10 +33,32 @@ def main(argv=None):
     cx = width / 2.0
     cy = height / 2.0
 
-    detections = vision_engine.detect_tags(image, fx, fy, cx, cy, args.tag_size)
-    print(f"Generated {args.family} id={args.tag_id} -> detections: {len(detections)}")
-    if detections:
-        print(detections[0])
+    def run_mode(copy_flag):
+        t0 = time.perf_counter()
+        detections = None
+        for _ in range(args.runs):
+            detections = vision_engine.detect_tags(
+                image, fx, fy, cx, cy, args.tag_size, copy=copy_flag
+            )
+        t1 = time.perf_counter()
+        return detections or [], (t1 - t0) / max(1, args.runs)
+
+    detections_copy, avg_copy = run_mode(True)
+    detections_nocopy, avg_nocopy = run_mode(False)
+
+    print(
+        f"Generated {args.family} id={args.tag_id} -> "
+        f"copy detections: {len(detections_copy)} "
+        f"({avg_copy*1000:.2f} ms avg)"
+    )
+    print(
+        f"Generated {args.family} id={args.tag_id} -> "
+        f"no-copy detections: {len(detections_nocopy)} "
+        f"({avg_nocopy*1000:.2f} ms avg)"
+    )
+    if detections_copy:
+        print("Example detection (copy):")
+        print(detections_copy[0])
     return 0
 
 

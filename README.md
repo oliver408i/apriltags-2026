@@ -68,7 +68,7 @@ If detections are missing, try `--scale` and `--invert` too.
 - `find_closest_tag_cython(tvecs)`  
   Pick the closest tag index from a list of translation vectors.
 
-- `detect_tags(image, fx, fy, cx, cy, tag_size)`  
+- `detect_tags(image, fx, fy, cx, cy, tag_size, copy=True)`  
   Run AprilTag detection on a grayscale `uint8` image. Returns a list of dicts:
   - `id`, `hamming`, `decision_margin`
   - `center`, `corners`
