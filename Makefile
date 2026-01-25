@@ -2,9 +2,10 @@ PYTHON ?= python3
 APRILTAG_BUILD_DIR ?= build/apriltag
 AT_STATIC_LIB = $(APRILTAG_BUILD_DIR)/libapriltag.a
 ENTRY ?= main.py
+BENCHMARK_ENTRY ?= demo_benchmark.py
 OUT_NAME = APD_2000
 
-.PHONY: all apriltag cython clean help nuitka
+.PHONY: all apriltag cython clean help nuitka nuitka-benchmark
 
 all: apriltag cython
 
@@ -30,6 +31,13 @@ nuitka: cython
 		--output-filename=$(OUT_NAME) \
 		$(ENTRY)
 
+nuitka-benchmark: cython
+	$(PYTHON) -m nuitka --standalone --onefile \
+		--follow-imports \
+		--include-package-data=cv2 \
+		--output-filename=demo_benchmark \
+		$(BENCHMARK_ENTRY)
+
 clean:
 	rm -rf $(APRILTAG_BUILD_DIR)
 	rm -rf $(ENTRY:.py=.dist)
@@ -42,4 +50,5 @@ clean:
 help:
 	@echo "make          - Build everything (C and Cython)"
 	@echo "make nuitka   - Bundle into a standalone binary (use ENTRY=file.py)"
+	@echo "make nuitka-benchmark - Bundle demo_benchmark into a standalone binary"
 	@echo "make clean    - Remove build artifacts"

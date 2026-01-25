@@ -10,6 +10,25 @@ AprilTag detector from 2025 but its rewritten in Cython instead of using Numba. 
 - `demo_live.py`: run detection on a live camera feed.
 - `demo_selftest.py`: generate a tag image and detect it (sanity check).
 
+## Benchmarks
+The following benchmarks were conducted using a synthetic 720p (1280x720) test suite to isolate computational latency from camera/USB bus overhead. 
+
+| Processor | Architecture | Threads | Latency (Det) | Max FPS |
+| :--- | :--- | :---: | :---: | :---: |
+| **Ryzen 7 7700X** | x86 (Zen 4) | 15 | **5.1 ms** | **191.3** |
+| Ryzen 7 7700X | x86 (Zen 4) | 4 | 7.6 ms | 128.3 |
+| **i5-1245U** | x86 (Alder Lake) | 12 | **9.4 ms** | **100.8** |
+| i5-1245U | x86 (Alder Lake) | 4 | 11.8 ms | 81.8 |
+| **Ryzen 3 4300U** | x86 (Zen 2) | 4 | *~17.5 ms* | *~57.0* |
+| **Cortex-A78AE** | ARM (v8.2) | 4 | **20.2 ms** | **47.4** |
+| Cortex-A78AE | ARM (v8.2) | 8 | 21.1 ms | 44.9 |
+| **Cortex-A76** | **ARM (Pi 5)** | **4** | **21.8 ms** | **43.2** |
+| Cortex-A76 | ARM (Pi 5) | 1 | 60.2 ms | 16.3 |
+| **i3-10110U** | x86 (Comet Lake) | 4 | **23.3 ms** | **41.2** |
+| i3-10110U | x86 (Comet Lake) | 1 | 43.5 ms | 22.4 |
+| **Cortex-A72** | **ARM (Pi 4B)** | **4** | **59.1 ms** | **16.2** |
+| Cortex-A72 | ARM (Pi 4B) | 1 | 146.0 ms | 6.7 |
+
 ## Downloading
 **IMPORTANT:** This repo uses the `apriltag_lib` submodule! Remember to do `git submodule update --init --recursive`
 
