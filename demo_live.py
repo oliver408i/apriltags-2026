@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 
 import vision_engine
+from tag_map_odometry import compute_camera_pose_from_map, load_tag_map
 
 
 def draw_detections(frame, detections, scale=1.0, show_pose=True):
@@ -112,9 +113,21 @@ def draw_pose_axes(frame, det, fx, fy, cx, cy, tag_size, dist_coeffs=None, scale
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Live AprilTag demo for vision_engine")
-    parser.add_argument("--camera", type=int, default=0, help="Camera index")
+    parser.add_argument("--camera", type=str, default='0', help="Camera index")
+    parser.add_argument(
+        "--backend",
+        choices=("auto", "v4l2"),
+        default="auto",
+        help="OpenCV capture backend (auto or v4l2)",
+    )
     parser.add_argument("--width", type=int, default=640, help="Capture width")
     parser.add_argument("--height", type=int, default=480, help="Capture height")
+    parser.add_argument("--camera-fps", type=int, default=30, help="Capture FPS request")
+    parser.add_argument(
+        "--fourcc",
+        default="MJPG",
+        help="FourCC for capture (e.g. MJPG, YUYV, H264)",
+    )
     parser.add_argument("--tag-size", type=float, default=0.120, help="Tag size in meters")
     parser.add_argument(
         "--family",
@@ -142,16 +155,49 @@ def main(argv=None):
         default=".",
         help="Directory for saved frames when pressing 's'",
     )
+    parser.add_argument(
+        "--tag-map",
+        default=None,
+        help="Optional JSON file describing static tag poses for multitag odometry",
+    )
 
     args = parser.parse_args(argv)
 
-    cap = cv2.VideoCapture(args.camera)
+    if args.backend == "v4l2":
+        cap = cv2.VideoCapture(args.camera, cv2.CAP_V4L2)
+    else:
+        cap = cv2.VideoCapture(args.camera)
     if not cap.isOpened():
         print("Failed to open camera.", file=sys.stderr)
         return 1
 
+    if args.fourcc:
+        fourcc = cv2.VideoWriter_fourcc(*args.fourcc)
+        cap.set(cv2.CAP_PROP_FOURCC, fourcc)
+
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
+    if args.camera_fps:
+        cap.set(cv2.CAP_PROP_FPS, args.camera_fps)
+
+    actual_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    actual_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    actual_fps = cap.get(cv2.CAP_PROP_FPS)
+    actual_fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+    fourcc_str = "".join(
+        [
+            chr((actual_fourcc >> 0) & 0xFF),
+            chr((actual_fourcc >> 8) & 0xFF),
+            chr((actual_fourcc >> 16) & 0xFF),
+            chr((actual_fourcc >> 24) & 0xFF),
+        ]
+    )
+    print(
+        "Capture settings:",
+        f"{actual_width}x{actual_height}",
+        f"{actual_fps:.2f} FPS",
+        f"FOURCC={fourcc_str}",
+    )
 
     fx = args.fx
     fy = args.fy
@@ -173,6 +219,10 @@ def main(argv=None):
         dist = np.load(args.dist_coeffs)
         dist_coeffs = dist.reshape((-1, 1)).astype(np.float64)
 
+    tag_map = None
+    if args.tag_map:
+        tag_map = load_tag_map(args.tag_map)
+
     vision_engine.set_tag_family(args.family)
     vision_engine.configure_detector(
         nthreads=args.nthreads,
@@ -189,14 +239,21 @@ def main(argv=None):
     last_cpu_percent = 0.0
     last_fps = 0.0
     last_latency_ms = 0.0
+    last_cap_ms = 0.0
+    last_pre_ms = 0.0
+    last_det_ms = 0.0
+    last_map_pose = None
 
     while True:
         frame_start = time.time()
+        cap_start = time.time()
         ok, frame = cap.read()
+        last_cap_ms = (time.time() - cap_start) * 1000.0
         if not ok:
             print("Failed to read camera frame.", file=sys.stderr)
             break
 
+        pre_start = time.time()
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         if args.scale and args.scale != 1.0:
             new_size = (
@@ -207,16 +264,25 @@ def main(argv=None):
         if args.invert:
             gray = 255 - gray
         height, width = gray.shape[:2]
+        last_pre_ms = (time.time() - pre_start) * 1000.0
 
         local_fx = fx if fx is not None else float(max(width, height))
         local_fy = fy if fy is not None else local_fx
         local_cx = cx if cx is not None else width / 2.0
         local_cy = cy if cy is not None else height / 2.0
 
+        det_start = time.time()
         detections = vision_engine.detect_tags(
             gray, local_fx, local_fy, local_cx, local_cy, args.tag_size
         )
+        last_det_ms = (time.time() - det_start) * 1000.0
         last_latency_ms = (time.time() - frame_start) * 1000.0
+
+        odom_pose = None
+        if tag_map:
+            odom_pose = compute_camera_pose_from_map(detections, tag_map)
+            if odom_pose:
+                last_map_pose = odom_pose
 
         if args.display:
             draw_detections(frame, detections, scale=args.scale, show_pose=True)
@@ -234,8 +300,27 @@ def main(argv=None):
                 )
             overlay = [
                 f"FPS: {last_fps:.1f}  CPU%: {last_cpu_percent:.1f}",
-                f"Detections: {len(detections)}  Latency: {last_latency_ms:.1f} ms",
+                (
+                    f"Detections: {len(detections)}  "
+                    f"Latency: {last_latency_ms:.1f} ms"
+                ),
+                (
+                    f"cap={last_cap_ms:.1f}ms pre={last_pre_ms:.1f}ms "
+                    f"det={last_det_ms:.1f}ms"
+                ),
             ]
+            if odom_pose:
+                trans = odom_pose["translation"]
+                roll, pitch, yaw = vision_engine.extract_euler_angles_cython(
+                    odom_pose["rotation"]
+                )
+                rpy_deg = np.degrees([roll, pitch, yaw])
+                overlay.append(
+                    f"Map t=({trans[0]:.3f}, {trans[1]:.3f}, {trans[2]:.3f}) m"
+                )
+                overlay.append(
+                    f"Map r=({rpy_deg[0]:.1f}, {rpy_deg[1]:.1f}, {rpy_deg[2]:.1f}) deg"
+                )
             y = 20
             for line in overlay:
                 cv2.putText(
@@ -272,10 +357,24 @@ def main(argv=None):
             last_report = now
             last_cpu_report = cpu_now
             frame_count = 0
+            map_info = ""
+            if last_map_pose:
+                trans = last_map_pose["translation"]
+                roll, pitch, yaw = vision_engine.extract_euler_angles_cython(
+                    last_map_pose["rotation"]
+                )
+                rpy_deg = np.degrees([roll, pitch, yaw])
+                map_info = (
+                    f" map t=({trans[0]:.2f}, {trans[1]:.2f}, {trans[2]:.2f}) "
+                    f"r=({rpy_deg[0]:.1f}, {rpy_deg[1]:.1f}, {rpy_deg[2]:.1f}) deg"
+                )
             if args.fps:
                 print(
                     f"FPS: {last_fps:.1f}  detections: {len(detections)}  "
-                    f"latency: {last_latency_ms:.1f} ms  cpu: {last_cpu_percent:.1f}%"
+                    f"latency: {last_latency_ms:.1f} ms  cpu: {last_cpu_percent:.1f}%  "
+                    f"cap={last_cap_ms:.1f}ms pre={last_pre_ms:.1f}ms "
+                    f"det={last_det_ms:.1f}ms"
+                    f"{map_info}"
                 )
 
         if args.display:

@@ -43,6 +43,37 @@ Self-test:
 python demo_selftest.py --family tag36h11 --tag-id 0
 ```
 
+## Multitag Odometry
+
+`demo_live.py` can optionally load a static tag map via `--tag-map path/to/your_map.json`. The map should describe each tag's pose in a shared coordinate frame and can be either a dictionary or a list of entries. Each entry needs an `id`, a `translation` as `[x, y, z]` in meters, and a `rotation` as a 3×3 matrix (a flat list of nine numbers is also accepted). For example:
+
+```json
+{
+  "0": {
+    "translation": [0.0, 0.0, 0.0],
+    "rotation": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+  },
+  "1": {
+    "translation": [0.5, 0.0, 0.0],
+    "rotation": [[0, -1, 0], [1, 0, 0], [0, 0, 1]]
+  }
+}
+```
+
+When a tag map is provided, detections that match the defined tags are fused into a single camera pose estimate. The pose is rendered on the display overlay and appended to the `--fps` telemetry line when present.
+
+A sample map is available at `tag_map_sample.json` if you need a quick configuration to test the odometry flow.
+
+## Simulator
+
+`demo_simulator.py` lets you validate the multitag odometry flow without a live camera. Supply the same JSON tag map (`--tag-map`) and the simulator will move a virtual camera around the map while emitting fake detections, computing the fused pose, and printing translation/orientation errors. Example:
+
+```
+python demo_simulator.py --tag-map path/to/map.json --frames 120 --radius 1.2 --rotation-noise 0.5
+```
+
+Use `--translation-noise` or `--rotation-noise` to stress-test the fusion with measurement noise and `--seed` for repeatable runs.
+
 ## Camera intrinsics
 If you have intrinsics:
 - `camera_matrix.npy` (3x3)
