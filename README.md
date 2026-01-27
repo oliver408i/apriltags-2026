@@ -19,7 +19,8 @@ The following benchmarks were conducted using a synthetic 720p (1280x720) test s
 | Ryzen 7 7700X | x86 (Zen 4) | 4 | 7.6 ms | 128.3 |
 | **i5-1245U** | x86 (Alder Lake) | 12 | **9.4 ms** | **100.8** |
 | i5-1245U | x86 (Alder Lake) | 4 | 11.8 ms | 81.8 |
-| **Ryzen 3 4300U** | x86 (Zen 2) | 4 | *~17.5 ms* | *~57.0* |
+| **Ryzen 3 4300U** | x86 (Zen 2) | 4 | **17.0 ms** | **56.1** |
+| Ryzen 3 4300U | x86 (Zen 2) | 1 | 41.5 ms | 23.7 |
 | **Cortex-A78AE** | ARM (v8.2) | 4 | **20.2 ms** | **47.4** |
 | Cortex-A78AE | ARM (v8.2) | 8 | 21.1 ms | 44.9 |
 | **Cortex-A76** | **ARM (Pi 5)** | **4** | **21.8 ms** | **43.2** |
