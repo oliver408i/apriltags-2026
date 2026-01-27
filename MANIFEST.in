@@ -1,0 +1,4 @@
+include src/engine.pyx
+include src/engine.c
+recursive-include src/apriltag_lib *.c *.h
+prune src/vision_engine.egg-info

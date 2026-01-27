@@ -7,6 +7,9 @@ from libc.stddef cimport size_t
 from libc.stdint cimport int32_t, uint8_t, uint32_t
 from libc.string cimport memcpy
 
+# Initialize NumPy C API.
+cnp.import_array()
+
 # --- Utility math helpers ---------------------------------------------------
 
 # Migrated from old Numba jit functions, to be used later

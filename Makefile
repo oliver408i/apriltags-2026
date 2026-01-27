@@ -5,7 +5,7 @@ ENTRY ?= main.py
 BENCHMARK_ENTRY ?= demo_benchmark.py
 OUT_NAME = APD_2000
 
-.PHONY: all apriltag cython clean help nuitka nuitka-benchmark
+.PHONY: all apriltag cython clean help nuitka nuitka-benchmark wheel wheel-clean
 
 all: apriltag cython
 
@@ -45,10 +45,22 @@ clean:
 	rm -rf $(ENTRY:.py=.onefile-dist)
 	rm -f vision_engine*.so
 	rm -f src/*.c
+	rm -rf build dist
+	rm -rf src/vision_engine.egg-info
 	rm -f $(OUT_NAME)
+
+wheel: apriltag
+	$(PYTHON) -m build
+
+wheel-clean:
+	rm -rf build dist
+	rm -rf src/vision_engine.egg-info
+	@echo "Wheel build artifacts cleaned."
 
 help:
 	@echo "make          - Build everything (C and Cython)"
 	@echo "make nuitka   - Bundle into a standalone binary (use ENTRY=file.py)"
 	@echo "make nuitka-benchmark - Bundle demo_benchmark into a standalone binary"
 	@echo "make clean    - Remove build artifacts"
+	@echo "make wheel    - Build sdist + wheel into dist/"
+	@echo "make wheel-clean - Clean artifacts and wheel outputs"
