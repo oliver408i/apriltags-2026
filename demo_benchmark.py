@@ -6,7 +6,6 @@ import time
 import cv2
 import numpy as np
 
-import vision_engine
 
 
 def _load_intrinsics(args, width, height):
@@ -95,6 +94,18 @@ def main(argv=None):
         help="Use synthetic frames instead of a camera/video",
     )
     parser.add_argument(
+        "--synthetic-tags",
+        type=int,
+        default=0,
+        help="Embed N generated AprilTags into synthetic frames (requires vision_engine)",
+    )
+    parser.add_argument(
+        "--synthetic-tag-size",
+        type=int,
+        default=96,
+        help="Pixel size for generated tags in synthetic frames",
+    )
+    parser.add_argument(
         "--backend",
         choices=("auto", "v4l2"),
         default="auto",
@@ -113,6 +124,12 @@ def main(argv=None):
         "--family",
         default="tag36h11",
         help="Tag family (e.g. tag36h11, tagStandard41h12)",
+    )
+    parser.add_argument(
+        "--engine",
+        choices=("vision_engine", "pupil"),
+        default="vision_engine",
+        help="Detector backend (vision_engine or pupil_apriltags)",
     )
     parser.add_argument("--nthreads", type=int, default=None, help="Detector threads")
     parser.add_argument("--quad-decimate", type=float, default=None, help="Quad decimate")
@@ -150,21 +167,76 @@ def main(argv=None):
             return 1
         _print_capture_info(cap)
 
-    vision_engine.set_tag_family(args.family)
-    vision_engine.configure_detector(
-        nthreads=args.nthreads,
-        quad_decimate=args.quad_decimate,
-        quad_sigma=args.quad_sigma,
-        refine_edges=args.refine_edges,
-        decode_sharpening=args.decode_sharpening,
-        debug=args.debug_images,
-    )
+    detect_fn = None
+    if args.engine == "vision_engine":
+        try:
+            import vision_engine
+        except Exception as exc:
+            print(
+                "vision_engine is not available. Build the extension or use --engine pupil.",
+                file=sys.stderr,
+            )
+            print(f"Import error: {exc}", file=sys.stderr)
+            return 1
+
+        vision_engine.set_tag_family(args.family)
+        vision_engine.configure_detector(
+            nthreads=args.nthreads,
+            quad_decimate=args.quad_decimate,
+            quad_sigma=args.quad_sigma,
+            refine_edges=args.refine_edges,
+            decode_sharpening=args.decode_sharpening,
+            debug=args.debug_images,
+        )
+
+        def detect_fn(gray, fx, fy, cx, cy):
+            return vision_engine.detect_tags(
+                gray, fx, fy, cx, cy, args.tag_size, copy=not args.no_copy
+            )
+
+    else:
+        try:
+            from pupil_apriltags import Detector
+        except Exception as exc:
+            print(
+                "pupil_apriltags is not available. Install it to use --engine pupil.",
+                file=sys.stderr,
+            )
+            print(f"Import error: {exc}", file=sys.stderr)
+            return 1
+
+        detector_kwargs = {"families": args.family}
+        if args.nthreads is not None:
+            detector_kwargs["nthreads"] = args.nthreads
+        if args.quad_decimate is not None:
+            detector_kwargs["quad_decimate"] = args.quad_decimate
+        if args.quad_sigma is not None:
+            detector_kwargs["quad_sigma"] = args.quad_sigma
+        if args.refine_edges is not None:
+            detector_kwargs["refine_edges"] = bool(args.refine_edges)
+        if args.decode_sharpening is not None:
+            detector_kwargs["decode_sharpening"] = args.decode_sharpening
+        if args.debug_images:
+            detector_kwargs["debug"] = True
+
+        detector = Detector(**detector_kwargs)
+
+        def detect_fn(gray, fx, fy, cx, cy):
+            if not gray.flags["C_CONTIGUOUS"]:
+                gray = np.ascontiguousarray(gray)
+            return detector.detect(
+                gray,
+                estimate_tag_pose=True,
+                camera_params=(fx, fy, cx, cy),
+                tag_size=args.tag_size,
+            )
 
     total_frames = 0
     total_det = 0
     total_cap_ms = 0.0
     total_pre_ms = 0.0
     total_det_ms = 0.0
+    det_samples_ms = []
 
     interval_frames = 0
     interval_det = 0
@@ -183,6 +255,54 @@ def main(argv=None):
         synth_gray = np.random.randint(
             0, 256, (args.height, args.width), dtype=np.uint8
         )
+        if args.synthetic_tags > 0:
+            try:
+                import vision_engine as ve_generator
+            except Exception as exc:
+                print(
+                    "vision_engine is required for --synthetic-tags. "
+                    "Build it or set --synthetic-tags 0.",
+                    file=sys.stderr,
+                )
+                print(f"Import error: {exc}", file=sys.stderr)
+                return 1
+
+            ve_generator.set_tag_family(args.family)
+            tag_size = max(16, int(args.synthetic_tag_size))
+            num_tags = max(1, int(args.synthetic_tags))
+            pad = max(4, tag_size // 16)
+            cols = max(1, int(np.ceil(np.sqrt(num_tags))))
+            rows = int(np.ceil(num_tags / cols))
+            grid_w = cols * tag_size + (cols + 1) * pad
+            grid_h = rows * tag_size + (rows + 1) * pad
+            if grid_w > args.width or grid_h > args.height:
+                print(
+                    "Synthetic tag grid exceeds frame. "
+                    "Reduce --synthetic-tags or --synthetic-tag-size, "
+                    "or increase --width/--height.",
+                    file=sys.stderr,
+                )
+                return 1
+
+            base = np.zeros((args.height, args.width), dtype=np.uint8) + 127
+            start_x = (args.width - grid_w) // 2 + pad
+            start_y = (args.height - grid_h) // 2 + pad
+            tag_id = 0
+            for r in range(rows):
+                for c in range(cols):
+                    if tag_id >= num_tags:
+                        break
+                    tag_img = ve_generator.generate_tag_image(tag_id)
+                    if tag_img.shape[0] != tag_size:
+                        tag_img = cv2.resize(
+                            tag_img, (tag_size, tag_size), interpolation=cv2.INTER_NEAREST
+                        )
+                    y0 = start_y + r * (tag_size + pad)
+                    x0 = start_x + c * (tag_size + pad)
+                    base[y0 : y0 + tag_size, x0 : x0 + tag_size] = tag_img
+                    tag_id += 1
+            synth_gray = base
+
         synth_color = cv2.cvtColor(synth_gray, cv2.COLOR_GRAY2BGR)
 
     while True:
@@ -216,9 +336,7 @@ def main(argv=None):
 
         fx, fy, cx, cy = _load_intrinsics(args, width, height)
         det_start = time.perf_counter()
-        detections = vision_engine.detect_tags(
-            gray, fx, fy, cx, cy, args.tag_size, copy=not args.no_copy
-        )
+        detections = detect_fn(gray, fx, fy, cx, cy)
         det_ms = (time.perf_counter() - det_start) * 1000.0
 
         if now >= warmup_end:
@@ -227,6 +345,7 @@ def main(argv=None):
             total_cap_ms += cap_ms
             total_pre_ms += pre_ms
             total_det_ms += det_ms
+            det_samples_ms.append(det_ms)
 
             interval_frames += 1
             interval_det += len(detections)
@@ -256,6 +375,9 @@ def main(argv=None):
 
     total_time = time.perf_counter() - max(warmup_end, start)
     if total_frames > 0 and total_time > 0:
+        p95 = float(np.percentile(det_samples_ms, 95)) if det_samples_ms else 0.0
+        p99 = float(np.percentile(det_samples_ms, 99)) if det_samples_ms else 0.0
+        p50 = float(np.percentile(det_samples_ms, 50)) if det_samples_ms else 0.0
         print(
             "Overall:",
             f"FPS={total_frames / total_time:.1f}",
@@ -263,6 +385,9 @@ def main(argv=None):
             f"cap={total_cap_ms / total_frames:.1f}ms",
             f"pre={total_pre_ms / total_frames:.1f}ms",
             f"det={total_det_ms / total_frames:.1f}ms",
+            f"det_p50={p50:.1f}ms",
+            f"det_p95={p95:.1f}ms",
+            f"det_p99={p99:.1f}ms",
         )
     else:
         print("No frames processed after warmup.", file=sys.stderr)

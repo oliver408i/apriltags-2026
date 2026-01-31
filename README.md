@@ -11,7 +11,7 @@ AprilTag detector from 2025 but its rewritten in Cython instead of using Numba. 
 - `demo_selftest.py`: generate a tag image and detect it (sanity check).
 
 ## Benchmarks
-The following benchmarks were conducted using a synthetic 720p (1280x720) test suite to isolate computational latency from camera/USB bus overhead. 
+The following benchmarks were conducted using a synthetic 720p (1280x720) test suite to isolate computational latency from camera/USB bus overhead. Note these are with NO TAGS and pure noise (worse case for the detector, see next table).
 
 | Processor | Architecture | Threads | Latency (Det) | Max FPS |
 | :--- | :--- | :---: | :---: | :---: |
@@ -29,6 +29,29 @@ The following benchmarks were conducted using a synthetic 720p (1280x720) test s
 | i3-10110U | x86 (Comet Lake) | 1 | 43.5 ms | 22.4 |
 | **Cortex-A72** | **ARM (Pi 4B)** | **4** | **59.1 ms** | **16.2** |
 | Cortex-A72 | ARM (Pi 4B) | 1 | 146.0 ms | 6.7 |
+
+## Comparison with pupil_apriltags
+1280×720, Synthetic, 4 Threads, No-Copy (this engine only), i5-1245U
+| Tags / Frame | Engine          | Mean Det (ms) | p50 (ms) | p95 (ms) | p99 (ms) | FPS       |
+| ------------ | --------------- | ------------- | -------- | -------- | -------- | --------- |
+| 0            | vision_engine   | **11.8**      | **11.8** | **12.8** | **13.5** | **81.5**  |
+| 0            | pupil_apriltags | 13.6          | 13.4     | 14.9     | 15.9     | 70.6      |
+| 1            | vision_engine   | **1.2**       | **1.1**  | **1.7**  | **2.1**  | **665.9** |
+| 1            | pupil_apriltags | 1.5           | 1.5      | 2.0      | 2.5      | 554.8     |
+| 5            | vision_engine   | **2.5**       | **2.3**  | **3.3**  | **3.8**  | **360.2** |
+| 5            | pupil_apriltags | 2.7           | 2.6      | 3.8      | 4.2      | 321.4     |
+| 10           | vision_engine   | 4.3           | 4.1      | **5.7**  | **6.1**  | **216.7** |
+| 10           | pupil_apriltags | **4.2**       | **4.0**  | 6.1      | 6.5      | 212.9     |
+
+### Percentage results
+| Tags / Frame | Mean Detection Time     | FPS                       | Tail Latency (p95 / p99) |
+| ------------ | ----------------------- | ------------------------- | ------------------------ |
+| **0**        | **~13% faster**         | **~15% higher**           | **~14–15% lower**        |
+| **1**        | **~20% faster**         | **~20% higher**           | **~15–20% lower**        |
+| **5**        | **~7–8% faster**        | **~12% higher**           | **~10–12% lower**        |
+| **10**       | ~2–3% slower (≈ parity) | ~2% higher (within noise) | **~6–7% lower**          |
+
+
 
 ## Downloading
 **IMPORTANT:** This repo uses the `apriltag_lib` submodule! Remember to do `git submodule update --init --recursive`
