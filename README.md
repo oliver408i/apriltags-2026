@@ -57,14 +57,18 @@ Use my private index:
 python -m pip install --index-url https://pypi.nitrogendioxide.dev/simple vision-engine
 ```
 
-Compatibility matrix (prebuilt wheels):
-| Platform | 3.10 | 3.11 | 3.12 | 3.13 | 3.14 |
-| --- | --- | --- | --- | --- | --- |
-| Linux x86_64 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Linux aarch64 | ✅ | ✅ | ✅ | ❌* | ❌* |
+Compatibility matrix (prebuilt wheels):  
+✅ = Prebuilt wheel  |  🟡 = Supported, but build from source (see below)  |  ⭕ = Untested, but should work (build from source)
 
-*sdist provided, or build from source (see below)  
-**3.7-3.9 possible, must build from source (see below)
+| Platform | 3.10 | 3.11 | 3.12 | 3.13 | 3.14 |
+| :-: | :-: | :-: | :-: | :-: | :-: |
+| Linux x86_64 | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Linux aarch64 | ✅ | ✅ | ✅ | 🟡 | 🟡 |
+| MacOS universal | 🟡 | 🟡 | 🟡 | ⭕* | ⭕* |
+
+
+> Windows: Native code is not ported. Unlikely that I ever will since this is for robotics  
+> *MacOS: Not maintained for future versions
 
 ## Downloading Source
 **IMPORTANT:** This repo uses the `apriltag_lib` submodule! Remember to do `git submodule update --init --recursive`
