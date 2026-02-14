@@ -9,8 +9,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vision-engine"
-version = "0.1.0"
-description = "AprilTag detector bindings implemented in Cython"
+version = "0.1.1"
+description = "Ultra-fast AprilTag detector bindings for edge robotics implemented in Cython"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
