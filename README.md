@@ -51,12 +51,25 @@ The following benchmarks were conducted using a synthetic 720p (1280x720) test s
 | **5**        | **~7–8% faster**        | **~12% higher**           | **~10–12% lower**        |
 | **10**       | ~2–3% slower (≈ parity) | ~2% higher (within noise) | **~6–7% lower**          |
 
+## Installing from Private PyPI
+Use my private index:
+```bash
+python -m pip install --index-url https://pypi.nitrogendioxide.dev/simple vision-engine
+```
 
+Compatibility matrix (prebuilt wheels):
+| Platform | 3.10 | 3.11 | 3.12 | 3.13 | 3.14 |
+| --- | --- | --- | --- | --- | --- |
+| Linux x86_64 | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Linux aarch64 | ✅ | ✅ | ✅ | ❌* | ❌* |
 
-## Downloading
+*sdist provided, or build from source (see below)  
+**3.7-3.9 possible, must build from source (see below)
+
+## Downloading Source
 **IMPORTANT:** This repo uses the `apriltag_lib` submodule! Remember to do `git submodule update --init --recursive`
 
-## Build
+## Build Source
 ```
 make
 ```
