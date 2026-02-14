@@ -1,5 +1,6 @@
 # setup.py
 from pathlib import Path
+import os
 
 from setuptools import setup, Extension
 from Cython.Build import cythonize
@@ -9,6 +10,7 @@ ROOT = Path(__file__).resolve().parent
 APRILTAG_ROOT = ROOT / "src" / "apriltag_lib"
 APRILTAG_COMMON = APRILTAG_ROOT / "common"
 APRILTAG_LIB = ROOT / "build" / "apriltag" / "libapriltag.a"
+USE_PREBUILT = os.environ.get("USE_PREBUILT_APRILTAG") == "1"
 
 def _collect_apriltag_sources():
     core_files = ["apriltag.c", "apriltag_pose.c", "apriltag_quad_thresh.c"]
@@ -20,7 +22,7 @@ def _collect_apriltag_sources():
 
 apriltag_sources = _collect_apriltag_sources()
 
-if APRILTAG_LIB.exists():
+if USE_PREBUILT and APRILTAG_LIB.exists():
     apriltag_build_sources = ["src/engine.pyx"]
     apriltag_extra_objects = [str(APRILTAG_LIB.relative_to(ROOT))]
 else:
@@ -41,7 +43,6 @@ extensions = [
         extra_objects=apriltag_extra_objects,
         extra_compile_args=[
             "-O3",
-            "-march=native",
             "-std=c11",
             "-D_GNU_SOURCE",
             "-D_DEFAULT_SOURCE",

@@ -1,0 +1,70 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: vision-engine-wheel-arm64
+spec:
+  template:
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      restartPolicy: Never
+      initContainers:
+      - name: fetch-repo
+        image: alpine/git:2.45.2
+        env:
+        - name: GIT_URL
+          value: "https://github.com/oliver408i/apriltags-2026"
+        - name: GIT_REF
+          value: "master"
+        command: ["/bin/sh", "-lc"]
+        args:
+        - |
+          set -euo pipefail
+          git clone --depth 1 --branch "$GIT_REF" "$GIT_URL" /io
+          cd /io
+          git submodule update --init --recursive
+        volumeMounts:
+        - name: src
+          mountPath: /io
+      containers:
+      - name: build
+        image: quay.io/pypa/manylinux2014_aarch64:2026.01.04-1
+        env:
+        - name: REPO_URL
+          value: "https://pypi.nitrogendioxide.dev"
+        - name: TWINE_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: pypi-creds
+              key: username
+        - name: TWINE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: pypi-creds
+              key: password
+        command: ["/bin/bash", "-lc"]
+        args:
+        - |
+          set -euo pipefail
+          cd /io
+          rm -rf build *.so
+
+          for py in /opt/python/cp310-cp310/bin/python \
+                    /opt/python/cp311-cp311/bin/python \
+                    /opt/python/cp312-cp312/bin/python; do
+            $py -m pip install -U pip build cython numpy
+            $py -m build --wheel --outdir /wheelhouse
+          done
+
+          for whl in /wheelhouse/*.whl; do
+            auditwheel repair "$whl" -w /wheelhouse/repaired
+          done
+
+          /opt/python/cp312-cp312/bin/python -m pip install -U twine
+          /opt/python/cp312-cp312/bin/python -m twine upload --repository-url "$REPO_URL" /wheelhouse/repaired/*.whl
+        volumeMounts:
+        - name: src
+          mountPath: /io
+      volumes:
+      - name: src
+        emptyDir: {}
